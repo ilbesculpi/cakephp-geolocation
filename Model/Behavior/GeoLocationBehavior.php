@@ -11,8 +11,9 @@ class GeoLocationBehavior extends ModelBehavior {
  *
  * $config for GeoLocationBehavior should be
  * array(
- *	'fields' => array('latitude' => 'latitudeName', 'longitude' => 'longitudeName'),
- *	'tableFields' => array('position', 'positionField')
+ *	'position' => array('latitude' => 'latitudeName', 'longitude' => 'longitudeName'),
+ *  'geom' => true | false,
+ *  'distance' => 'distanceName'
  * )
  * 
  * @param Model $model Model the behavior is being attached to.
@@ -21,21 +22,18 @@ class GeoLocationBehavior extends ModelBehavior {
  */
 	public function setup(Model $Model, $settings = array()) {
 		
-		if (!isset($this->settings[$Model->alias])) {
-			$this->settings[$Model->alias] = array (
-				'fields' => array('latitude' => 'latitude', 'longitude' => 'longitude'),
-				'tableFields' => array('position' => 'position')
-			);
-		}
-		
-		$this->settings[$Model->alias] = array_merge(
-			$this->settings[$Model->alias], (array) $settings
+		$defaults = array (
+			'position' => array('latitude' => 'latitude', 'longitude' => 'longitude'),
+			'geom' => false,
+			'distance' => 'distance'
 		);
 		
-		$settings = $this->settings[$Model->alias];
-		// attach virtualFields to the Model
-		$Model->virtualFields[$settings['fields']['latitude']] = sprintf('X(%s.%s)', $Model->alias, $settings['tableFields']['position']);
-		$Model->virtualFields[$settings['fields']['longitude']] = sprintf('Y(%s.%s)', $Model->alias, $settings['tableFields']['position']);
+		$settings = array_merge($defaults, (array) $settings);
+		
+		if (!isset($this->settings[$Model->alias])) {
+			$this->settings[$Model->alias] = $settings;
+		}
+		
 	}
 	
 /**
@@ -46,9 +44,6 @@ class GeoLocationBehavior extends ModelBehavior {
  */
 	public function cleanup(Model $model) {
 		$settings = $this->settings[$model->alias];
-		// dettach virtualFields from Model
-		unset($Model->virtualFields[$settings['fields']['latitude']]);
-		unset($Model->virtualFields[$settings['fields']['longitude']]);
 		unset($this->settings[$model->alias]);
 	}
 	
@@ -62,9 +57,9 @@ class GeoLocationBehavior extends ModelBehavior {
 	public function afterFind(Model $model, $results, $primary) {
 		//parent::afterFind($model, $results, $primary);
 		$settings = $this->settings[$model->alias];
-		foreach($results as $k => $result) {
-			if( isset($results[$k][$model->alias]) )
-				unset($results[$k][$model->alias][$settings['tableFields']['position']]);
+		if( $settings['geom'] ) {
+			// unset point field
+			
 		}
 		return $results;
 	}
@@ -76,14 +71,8 @@ class GeoLocationBehavior extends ModelBehavior {
 	public function beforeSave(Model $model) {
 		//parent::beforeSave($model);
 		$settings = $this->settings[$model->alias];
-		if( isset($model->data[$model->alias][$settings['fields']['latitude']]) &&
-				isset($model->data[$model->alias][$settings['fields']['longitude']]) ) {
-			$model->data[$model->alias][$settings['tableFields']['position']] = DboSource::expression(
-				sprintf('GeomFromText("POINT(%f %f)")', 
-						$model->data[$model->alias][$settings['fields']['latitude']],
-						$model->data[$model->alias][$settings['fields']['longitude']]
-				)
-			);
+		if( $settings['geom'] ) {
+			
 		}
 		return true;
 	}
@@ -106,20 +95,40 @@ class GeoLocationBehavior extends ModelBehavior {
 			
 			unset($query['center']);
 			
-			$defaults = array (
-				'fields' => array('*', sprintf("
-						SQRT(
-							POW( ABS( X(%s.%s) - $latitude ), 2) + POW( ABS( Y(%s.%s) - $longitude ), 2)
-						) * 100 AS distance", 
-						$model->alias, $settings['tableFields']['position'],
-						$model->alias, $settings['tableFields']['position']
-					)
-				),
-				'group' => array (
-					sprintf("%s.id HAVING distance <= $radius", $model->alias)
-				),
-				'order' => 'distance ASC'
-			);
+			if( $settings['geom'] ) {
+				$defaults = array (
+					'fields' => array('*', sprintf("
+							SQRT(
+								POW( ABS( X(%s.%s) - $latitude ), 2) + POW( ABS( Y(%s.%s) - $longitude ), 2)
+							) * 100 AS %s", 
+							$model->alias, $settings['position']['latitude'],
+							$model->alias, $settings['position']['longitude'],
+							$settings['distance']
+						)
+					),
+					'group' => array (
+						sprintf("%s.%s HAVING %s <= %f", $model->alias, $model->primaryKey, $settings['distance'], $radius)
+					),
+					'order' => $settings['distance'] . ' ASC'
+				);
+			}
+			else {
+				$defaults = array (
+					'fields' => array('*', sprintf("
+							SQRT(
+								POW( ABS( %s.%s - $latitude ), 2) + POW( ABS( %s.%s - $longitude ), 2)
+							) * 100 AS %s", 
+							$model->alias, $settings['position']['latitude'],
+							$model->alias, $settings['position']['longitude'],
+							$settings['distance']
+						)
+					),
+					'group' => array (
+						sprintf("%s.%s HAVING %s <= %f", $model->alias, $model->primaryKey, $settings['distance'], $radius)
+					),
+					'order' => $settings['distance'] . ' ASC'
+				);
+			}
 			
 			$criteria = array_merge($defaults, (array) $query);
 			
