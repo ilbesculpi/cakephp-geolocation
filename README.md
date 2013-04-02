@@ -4,7 +4,7 @@ CakePHP 2.x tools for searching and geotagging data.
 ## Installation
 1. Create your table with <b>latitude</b> and <b>longitude</b> fields.
 
-2. Place GeoLocationBehavior into **app/Model/Behavior
+2. Place GeoLocationBehavior into <i>app/Model/Behavior</i>
 
 3. Add the Behavior to your Model:
 ```php
